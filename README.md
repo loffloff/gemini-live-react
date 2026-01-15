@@ -14,7 +14,7 @@ Building real-time voice with Gemini Live is harder than it looks:
 - **Buffer management**: Play audio too early = choppy. Buffer too much = laggy
 - **Playback chaining**: New audio chunks arrive while playing. Chain them wrong = gaps and clicks
 
-We spent a day figuring this out for [deflectionrate](https://deflectionrate.com). Now you don't have to.
+I spent some hours figuring this out. Hope it saves you some time!
 
 ## Quick Start
 
@@ -183,4 +183,4 @@ PRs welcome! Please:
 
 ## License
 
-MIT - Built by [deflectionrate](https://deflectionrate.com)
+MIT - Made by [loffloff](https://github.com/loffloff)
