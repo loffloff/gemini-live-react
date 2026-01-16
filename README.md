@@ -3,6 +3,8 @@
 Real-time bidirectional voice streaming with Google Gemini Live API for React.
 
 [![npm version](https://badge.fury.io/js/gemini-live-react.svg)](https://www.npmjs.com/package/gemini-live-react)
+[![npm downloads](https://img.shields.io/npm/dm/gemini-live-react.svg)](https://www.npmjs.com/package/gemini-live-react)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Why This Exists
@@ -73,10 +75,14 @@ function App() {
 
 - **Voice in/out** - Full duplex audio streaming
 - **Screen sharing** - Gemini can see what you share
+- **Tool calling** - Let AI execute functions and get results back
+- **Voice Activity Detection** - Only send audio when speaking (saves bandwidth)
 - **Transcription** - Real-time speech-to-text for both sides
 - **Streaming transcripts** - Show partial transcripts as users speak
 - **Welcome messages** - Auto-trigger AI greeting on connect
-- **Auto-reconnect** - Exponential backoff on connection loss
+- **Connection state machine** - Unified state management (`idle` → `connecting` → `connected`)
+- **Debug mode** - Built-in logging for diagnosing issues
+- **Auto-reconnect** - Configurable exponential backoff
 - **Session resumption** - Pick up where you left off
 - **TypeScript** - Full type definitions
 
@@ -94,8 +100,10 @@ const {
   // State
   isConnected,       // Connected to proxy
   isConnecting,      // Attempting connection
+  connectionState,   // 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error' | 'disconnected'
   isSpeaking,        // AI audio playing
   isMuted,           // Mic muted
+  isUserSpeaking,    // User speaking (VAD)
   error,             // Error message
   transcripts,       // Conversation history
   streamingText,     // AI's current partial transcript (real-time)
@@ -105,15 +113,37 @@ const {
   connect,          // Start session (optional: pass video element)
   disconnect,       // End session
   sendText,         // Send text message
+  sendToolResult,   // Send tool result back to AI
   setMuted,         // Mute/unmute mic
   clearTranscripts, // Clear history
 } = useGeminiLive({
   proxyUrl: string,              // Required
-  sessionId?: string,            // Optional
+  sessionId?: string,            // Optional session identifier
   welcomeMessage?: string,       // Sent to AI on connect to trigger greeting
-  onTranscript?: (t) => void,    // On new transcript
-  onError?: (e) => void,         // On error
+  debug?: boolean | DebugCallback, // Enable logging (true or custom callback)
+
+  // Tool calling
+  tools?: ToolDefinition[],      // Function definitions for AI
+  onToolCall?: (name, args) => result, // Handle tool calls
+
+  // Voice Activity Detection
+  vad?: boolean,                 // Only send audio when speaking
+  vadOptions?: { threshold?, minSpeechDuration?, silenceDuration? },
+
+  // Reconnection
+  reconnection?: {
+    maxAttempts?: number,        // Default: 5
+    initialDelay?: number,       // Default: 1000ms
+    maxDelay?: number,           // Default: 10000ms
+    backoffFactor?: number,      // Default: 2
+  },
+
+  // Callbacks
+  onTranscript?: (t) => void,
+  onError?: (e) => void,
   onConnectionChange?: (c) => void,
+
+  // Audio tuning
   minBufferMs?: number,          // Default: 200
   transcriptDebounceMs?: number, // Default: 1500
 });
@@ -147,6 +177,76 @@ const startWithScreen = async () => {
 
 Frames are sent at 1 FPS, scaled to max 1024px width.
 
+## Tool Calling
+
+Let AI execute functions and get results back - perfect for building agents:
+
+```tsx
+const { connect } = useGeminiLive({
+  proxyUrl: '...',
+  tools: [
+    {
+      name: 'lookup_knowledge',
+      description: 'Search the knowledge base for information',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query' }
+        },
+        required: ['query']
+      }
+    }
+  ],
+  onToolCall: async (toolName, args) => {
+    if (toolName === 'lookup_knowledge') {
+      const result = await searchKnowledgeBase(args.query);
+      return { answer: result };
+    }
+  }
+});
+```
+
+## Voice Activity Detection (VAD)
+
+Only send audio when the user is speaking - reduces bandwidth and improves latency:
+
+```bash
+# Install optional VAD dependency
+npm install @ricky0123/vad-web
+```
+
+```tsx
+const { isUserSpeaking } = useGeminiLive({
+  proxyUrl: '...',
+  vad: true,
+  vadOptions: {
+    threshold: 0.5,        // Speech detection sensitivity (0-1)
+    minSpeechDuration: 250, // ms before triggering
+    silenceDuration: 300,   // ms of silence before ending
+  }
+});
+
+// Show visual feedback
+{isUserSpeaking && <div className="recording-indicator" />}
+```
+
+## Debug Mode
+
+Enable logging to diagnose connection issues:
+
+```tsx
+// Simple console logging
+useGeminiLive({ proxyUrl: '...', debug: true });
+
+// Custom logger
+useGeminiLive({
+  proxyUrl: '...',
+  debug: (level, message, data) => {
+    myLogger.log({ level, message, ...data });
+  }
+});
+```
+
 ## How It Works
 
 ```
@@ -176,20 +276,28 @@ See [`examples/`](./examples) for:
 
 ## Roadmap
 
+- [x] Voice Activity Detection (VAD)
+- [x] Tool/function calling
+- [x] Debug logging mode
+- [x] Connection state machine
+- [x] Configurable reconnection
 - [ ] Vanilla JS core (`@gemini-live/core`)
 - [ ] Vue hook (`@gemini-live/vue`)
 - [ ] Cloudflare Workers proxy
 - [ ] Vercel Edge proxy
-- [ ] Voice Activity Detection (VAD)
-- [ ] Tool calling plugin system
 
 ## Contributing
 
-PRs welcome! Please:
-- Test on Chrome, Firefox, Safari
-- Test with different sample rates (44.1kHz, 48kHz)
-- Add types for new features
+PRs welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+
+Please read our [Code of Conduct](./CODE_OF_CONDUCT.md) before participating.
 
 ## License
 
 MIT - Made by [loffloff](https://github.com/loffloff)
+
+---
+
+<p align="center">
+  <sub>Built for the Gemini Live API. Not affiliated with Google.</sub>
+</p>
