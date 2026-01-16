@@ -29,6 +29,12 @@ export interface UseGeminiLiveOptions {
   sessionId?: string;
 
   /**
+   * Optional message sent to AI immediately after connection to trigger a greeting
+   * @example 'Please greet the user warmly and ask how you can help them today.'
+   */
+  welcomeMessage?: string;
+
+  /**
    * Callback fired when a new transcript entry is finalized
    * Transcripts are debounced - this fires after 1.5s of silence
    */
@@ -79,6 +85,18 @@ export interface UseGeminiLiveReturn {
 
   /** All transcript entries from the session */
   transcripts: Transcript[];
+
+  /**
+   * AI's current partial transcript (real-time, before debounce finalizes)
+   * null when AI is not currently speaking or transcript is finalized
+   */
+  streamingText: string | null;
+
+  /**
+   * User's current partial transcript (real-time, before debounce finalizes)
+   * null when user is not currently speaking or transcript is finalized
+   */
+  streamingUserText: string | null;
 
   /**
    * Connect to the Gemini Live proxy

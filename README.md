@@ -65,11 +65,17 @@ function App() {
 }
 ```
 
+## See It In Production
+
+[deflectionrate.com](https://deflectionrate.com) - AI-powered customer support deflection built with this library.
+
 ## Features
 
 - **Voice in/out** - Full duplex audio streaming
 - **Screen sharing** - Gemini can see what you share
 - **Transcription** - Real-time speech-to-text for both sides
+- **Streaming transcripts** - Show partial transcripts as users speak
+- **Welcome messages** - Auto-trigger AI greeting on connect
 - **Auto-reconnect** - Exponential backoff on connection loss
 - **Session resumption** - Pick up where you left off
 - **TypeScript** - Full type definitions
@@ -86,12 +92,14 @@ function App() {
 ```typescript
 const {
   // State
-  isConnected,      // Connected to proxy
-  isConnecting,     // Attempting connection
-  isSpeaking,       // AI audio playing
-  isMuted,          // Mic muted
-  error,            // Error message
-  transcripts,      // Conversation history
+  isConnected,       // Connected to proxy
+  isConnecting,      // Attempting connection
+  isSpeaking,        // AI audio playing
+  isMuted,           // Mic muted
+  error,             // Error message
+  transcripts,       // Conversation history
+  streamingText,     // AI's current partial transcript (real-time)
+  streamingUserText, // User's current partial transcript (real-time)
 
   // Actions
   connect,          // Start session (optional: pass video element)
@@ -102,6 +110,7 @@ const {
 } = useGeminiLive({
   proxyUrl: string,              // Required
   sessionId?: string,            // Optional
+  welcomeMessage?: string,       // Sent to AI on connect to trigger greeting
   onTranscript?: (t) => void,    // On new transcript
   onError?: (e) => void,         // On error
   onConnectionChange?: (c) => void,

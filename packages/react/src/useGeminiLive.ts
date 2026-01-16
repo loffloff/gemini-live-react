@@ -34,6 +34,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
   const {
     proxyUrl,
     sessionId,
+    welcomeMessage,
     onTranscript,
     onError,
     onConnectionChange,
@@ -47,6 +48,8 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [streamingUserText, setStreamingUserText] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -459,6 +462,15 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                   startFrameCapture();
                 }
                 startMicCapture();
+                // Send welcome message to trigger AI greeting
+                if (welcomeMessage && socketRef.current?.readyState === WebSocket.OPEN) {
+                  socketRef.current.send(
+                    JSON.stringify({
+                      type: 'text',
+                      text: welcomeMessage,
+                    })
+                  );
+                }
                 break;
 
               case 'audio':
@@ -472,6 +484,9 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                 if (data.text) {
                   inputTranscriptBufferRef.current += data.text;
 
+                  // Update streaming state for real-time display
+                  setStreamingUserText(inputTranscriptBufferRef.current.trim());
+
                   if (inputTranscriptTimeoutRef.current) {
                     clearTimeout(inputTranscriptTimeoutRef.current);
                   }
@@ -482,6 +497,8 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                       addTranscript('user', finalText);
                       inputTranscriptBufferRef.current = '';
                     }
+                    // Clear streaming state after finalizing
+                    setStreamingUserText(null);
                   }, transcriptDebounceMs);
                 }
                 break;
@@ -490,6 +507,9 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                 // AI's speech transcribed to text - accumulate chunks
                 if (data.text) {
                   outputTranscriptBufferRef.current += data.text;
+
+                  // Update streaming state for real-time display
+                  setStreamingText(outputTranscriptBufferRef.current.trim());
 
                   if (outputTranscriptTimeoutRef.current) {
                     clearTimeout(outputTranscriptTimeoutRef.current);
@@ -501,6 +521,8 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                       addTranscript('assistant', finalText);
                       outputTranscriptBufferRef.current = '';
                     }
+                    // Clear streaming state after finalizing
+                    setStreamingText(null);
                   }, transcriptDebounceMs);
                 }
                 break;
@@ -573,6 +595,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     [
       proxyUrl,
       sessionId,
+      welcomeMessage,
       startFrameCapture,
       stopFrameCapture,
       startMicCapture,
@@ -611,6 +634,8 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     }
     inputTranscriptBufferRef.current = '';
     outputTranscriptBufferRef.current = '';
+    setStreamingText(null);
+    setStreamingUserText(null);
 
     if (socketRef.current) {
       socketRef.current.close(1000, 'User disconnected');
@@ -660,6 +685,8 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     transcripts,
     isSpeaking,
     isMuted,
+    streamingText,
+    streamingUserText,
     connect,
     disconnect,
     sendText,
