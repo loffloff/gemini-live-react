@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-01-16
+
+### Added
+- **Browser Capability Utilities** - Detection functions for mobile/iOS support:
+  - `isIOS()` - Check if running on iOS device
+  - `isMobile()` - Check if running on mobile device
+  - `canScreenRecord()` - Check if screen recording is supported
+  - `shouldUseCameraMode()` - Check if camera fallback should be used
+  - `getVideoMimeType()` - Get recommended video MIME type for browser
+  - `getRecommendedAudioConstraints()` - Get optimized audio constraints
+- Mobile usage guide (`docs/MOBILE.md`) with:
+  - Camera fallback patterns for iOS
+  - Video element setup (`playsInline` attribute)
+  - Audio optimization tips
+  - Codec considerations
+  - Common issues and solutions
+- Mobile Support section in README
+
 ## [0.2.0] - 2025-01-16
 
 ### Added

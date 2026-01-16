@@ -10,3 +10,13 @@ export type {
   ToolCall,
   ToolCallHandler,
 } from './types';
+
+// Browser capability detection utilities
+export {
+  isIOS,
+  isMobile,
+  canScreenRecord,
+  shouldUseCameraMode,
+  getVideoMimeType,
+  getRecommendedAudioConstraints,
+} from './browserCapabilities';

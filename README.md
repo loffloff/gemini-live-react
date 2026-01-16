@@ -177,6 +177,45 @@ const startWithScreen = async () => {
 
 Frames are sent at 1 FPS, scaled to max 1024px width.
 
+## Mobile Support
+
+iOS Safari and some mobile browsers don't support screen recording. The library exports utilities for detection and fallback:
+
+```tsx
+import {
+  shouldUseCameraMode,
+  canScreenRecord,
+  isIOS,
+  isMobile,
+} from 'gemini-live-react';
+
+// Decide between screen share and camera
+const startWithVideo = async () => {
+  let stream: MediaStream;
+
+  if (canScreenRecord()) {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+  } else {
+    // Camera fallback for mobile
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }
+    });
+  }
+
+  videoRef.current!.srcObject = stream;
+  await videoRef.current!.play();
+  await connect(videoRef.current!);
+};
+```
+
+**Important for iOS**: Always add `playsInline` to video elements:
+
+```html
+<video ref={videoRef} playsInline muted />
+```
+
+See [docs/MOBILE.md](./docs/MOBILE.md) for the complete mobile guide.
+
 ## Tool Calling
 
 Let AI execute functions and get results back - perfect for building agents:
