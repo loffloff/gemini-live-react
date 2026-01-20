@@ -8,6 +8,10 @@ import type {
   ConnectionMetrics,
   DebugLevel,
   DebugCallback,
+  BrowserControlCommand,
+  BrowserControlResult,
+  UICommand,
+  UICommandType,
 } from './types';
 
 /**
@@ -50,6 +54,9 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     onToolCall,
     vad = false,
     vadOptions,
+    browserControl,
+    onBrowserControl,
+    onUICommand,
   } = options;
 
   // Reconnection config with defaults
@@ -114,6 +121,9 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
   const outputTranscriptBufferRef = useRef<string>('');
   const inputTranscriptTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outputTranscriptTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Console errors buffer for browser control get_errors action
+  const consoleErrorsRef = useRef<string[]>([]);
 
   // Audio refs - separate contexts for input (16kHz) and output (24kHz)
   const playbackContextRef = useRef<AudioContext | null>(null);
@@ -540,6 +550,282 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     [onTranscript]
   );
 
+  // =============================================================================
+  // Browser Control - DOM Helper Functions
+  // =============================================================================
+
+  /**
+   * Highlight an element in the DOM with a visual indicator
+   */
+  const highlightElement = useCallback(
+    (selector: string, message?: string, duration = 3000) => {
+      const el = document.querySelector(selector);
+      if (!el) return;
+
+      const rect = el.getBoundingClientRect();
+      const overlay = document.createElement('div');
+      overlay.className = 'gemini-live-highlight';
+      const highlightColor = browserControl?.highlightStyle?.color || '#3b82f6';
+      const borderWidth = browserControl?.highlightStyle?.borderWidth || 3;
+      overlay.style.cssText = `
+        position: fixed;
+        top: ${rect.top - 4}px;
+        left: ${rect.left - 4}px;
+        width: ${rect.width + 8}px;
+        height: ${rect.height + 8}px;
+        border: ${borderWidth}px solid ${highlightColor};
+        border-radius: 4px;
+        pointer-events: none;
+        z-index: 999999;
+        box-shadow: 0 0 10px ${highlightColor}40;
+        transition: opacity 0.3s ease;
+      `;
+
+      if (message) {
+        const label = document.createElement('div');
+        label.textContent = message;
+        label.style.cssText = `
+          position: absolute;
+          top: -28px;
+          left: 0;
+          background: ${highlightColor};
+          color: white;
+          padding: 4px 8px;
+          font-size: 12px;
+          border-radius: 4px;
+          white-space: nowrap;
+        `;
+        overlay.appendChild(label);
+      }
+
+      document.body.appendChild(overlay);
+
+      const actualDuration = browserControl?.highlightStyle?.duration ?? duration;
+      setTimeout(() => {
+        overlay.style.opacity = '0';
+        setTimeout(() => overlay.remove(), 300);
+      }, actualDuration);
+    },
+    [browserControl?.highlightStyle]
+  );
+
+  /**
+   * Click an element in the DOM
+   */
+  const clickElement = useCallback(
+    async (selector: string): Promise<BrowserControlResult> => {
+      try {
+        const el = document.querySelector(selector);
+        if (!el) {
+          return { success: false, error: `Element not found: ${selector}` };
+        }
+        (el as HTMLElement).click();
+        return { success: true, message: `Clicked ${selector}` };
+      } catch (err) {
+        return { success: false, error: String(err) };
+      }
+    },
+    []
+  );
+
+  /**
+   * Type text into an input element
+   */
+  const typeIntoElement = useCallback(
+    async (selector: string, text: string, clear = true): Promise<BrowserControlResult> => {
+      try {
+        const el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement;
+        if (!el) {
+          return { success: false, error: `Element not found: ${selector}` };
+        }
+        if (clear) {
+          el.value = '';
+        }
+        el.value += text;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { success: true, message: `Typed into ${selector}` };
+      } catch (err) {
+        return { success: false, error: String(err) };
+      }
+    },
+    []
+  );
+
+  /**
+   * Scroll to an element or in a direction
+   */
+  const scrollTo = useCallback(
+    (target: string | { direction: 'up' | 'down' | 'left' | 'right'; amount?: number }) => {
+      if (typeof target === 'string') {
+        document.querySelector(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        const amount = target.amount || 300;
+        const dir = target.direction;
+        window.scrollBy({
+          top: dir === 'down' ? amount : dir === 'up' ? -amount : 0,
+          left: dir === 'right' ? amount : dir === 'left' ? -amount : 0,
+          behavior: 'smooth',
+        });
+      }
+    },
+    []
+  );
+
+  /**
+   * Serialize DOM structure for AI to understand page layout
+   */
+  const serializeDOM = useCallback(
+    (root: Element | null, maxDepth: number, currentDepth = 0): unknown => {
+      if (!root || currentDepth >= maxDepth) return null;
+
+      const result: Record<string, unknown> = {
+        tag: root.tagName.toLowerCase(),
+        id: root.id || undefined,
+        className: root.className || undefined,
+      };
+
+      // Include key attributes for interactive elements
+      if (root instanceof HTMLInputElement) {
+        result.type = root.type;
+        result.value = root.value;
+        result.placeholder = root.placeholder || undefined;
+      } else if (root instanceof HTMLAnchorElement) {
+        result.href = root.href;
+        result.text = root.textContent?.trim().slice(0, 50);
+      } else if (root instanceof HTMLButtonElement) {
+        result.text = root.textContent?.trim().slice(0, 50);
+      }
+
+      // Add selector for AI to use
+      if (root.id) {
+        result.selector = `#${root.id}`;
+      } else if (root.className) {
+        const firstClass = root.className.split(' ')[0];
+        result.selector = `${root.tagName.toLowerCase()}.${firstClass}`;
+      }
+
+      const children = Array.from(root.children)
+        .map((child) => serializeDOM(child, maxDepth, currentDepth + 1))
+        .filter(Boolean);
+
+      if (children.length > 0) {
+        result.children = children;
+      }
+
+      return result;
+    },
+    []
+  );
+
+  /**
+   * Send a browser control result back to the AI
+   */
+  const sendBrowserControlResult = useCallback(
+    (toolCallId: string, result: BrowserControlResult) => {
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        log('info', 'Sending browser control result', { toolCallId, result });
+        socketRef.current.send(
+          JSON.stringify({
+            type: 'browser_control_result',
+            toolCallId,
+            result,
+          })
+        );
+      }
+    },
+    [log]
+  );
+
+  /**
+   * Execute a browser control command
+   */
+  const executeBrowserControl = useCallback(
+    async (cmd: BrowserControlCommand): Promise<BrowserControlResult> => {
+      try {
+        switch (cmd.action) {
+          case 'click': {
+            return await clickElement(cmd.args.selector || '');
+          }
+
+          case 'type': {
+            const el = document.querySelector(cmd.args.selector || '') as HTMLInputElement;
+            if (!el) return { success: false, error: 'Element not found' };
+            if (cmd.args.clear !== false) el.value = '';
+            el.value += cmd.args.text || '';
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return { success: true, message: `Typed into ${cmd.args.selector}` };
+          }
+
+          case 'scroll': {
+            if (cmd.args.selector) {
+              document.querySelector(cmd.args.selector)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else {
+              const amount = cmd.args.amount || 300;
+              const dir = cmd.args.direction || 'down';
+              window.scrollBy({
+                top: dir === 'down' ? amount : dir === 'up' ? -amount : 0,
+                left: dir === 'right' ? amount : dir === 'left' ? -amount : 0,
+                behavior: 'smooth',
+              });
+            }
+            return { success: true };
+          }
+
+          case 'highlight': {
+            highlightElement(cmd.args.selector || '', cmd.args.message, cmd.args.duration);
+            return { success: true };
+          }
+
+          case 'get_dom': {
+            const root = document.querySelector(cmd.args.selector || 'body');
+            const dom = serializeDOM(root, cmd.args.maxDepth || 5);
+            return { success: true, data: dom };
+          }
+
+          case 'get_errors': {
+            const limit = cmd.args.limit || 20;
+            return { success: true, data: consoleErrorsRef.current.slice(-limit) };
+          }
+
+          default:
+            return { success: false, error: `Unknown action: ${cmd.action}` };
+        }
+      } catch (err) {
+        return { success: false, error: String(err) };
+      }
+    },
+    [clickElement, highlightElement, serializeDOM]
+  );
+
+  /**
+   * Execute a UI command (for autoExecuteUI mode)
+   */
+  const executeUICommand = useCallback(
+    (cmd: UICommand) => {
+      // Default UI command execution - can be enhanced
+      switch (cmd.command) {
+        case 'highlight_element':
+          if (cmd.args.selector) {
+            highlightElement(
+              cmd.args.selector as string,
+              cmd.args.message as string | undefined,
+              cmd.args.duration as number | undefined
+            );
+          }
+          break;
+        case 'think_aloud':
+          log('info', 'AI thinking aloud', { message: cmd.args.message });
+          break;
+        // Other UI commands would be handled by the onUICommand callback
+        default:
+          log('verbose', 'UI command received', { command: cmd.command, args: cmd.args });
+      }
+    },
+    [highlightElement, log]
+  );
+
   /**
    * Connect to the Gemini Live proxy
    */
@@ -691,9 +977,35 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                 stopMicCapture();
                 break;
 
-              case 'tool_call':
-                // Handle tool call from AI
-                if (data.toolCallId && data.toolName && onToolCall) {
+              case 'tool_call': {
+                // Check if it's a UI command
+                const uiCommands: UICommandType[] = [
+                  'highlight_element',
+                  'show_action_button',
+                  'update_checklist',
+                  'think_aloud',
+                  'ask_user',
+                  'run_diagnostic',
+                  'escalate_to_human',
+                ];
+
+                if (data.toolCallId && data.toolName && uiCommands.includes(data.toolName as UICommandType)) {
+                  // Handle as UI command
+                  const uiCommand: UICommand = {
+                    toolCallId: data.toolCallId,
+                    command: data.toolName as UICommandType,
+                    args: data.args || {},
+                  };
+
+                  log('info', 'Received UI command', { command: uiCommand });
+
+                  if (browserControl?.autoExecuteUI) {
+                    executeUICommand(uiCommand);
+                  }
+
+                  onUICommand?.(uiCommand);
+                } else if (data.toolCallId && data.toolName && onToolCall) {
+                  // Handle as regular tool call
                   log('info', 'Received tool call', {
                     id: data.toolCallId,
                     name: data.toolName,
@@ -731,6 +1043,36 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                     });
                 }
                 break;
+              }
+
+              case 'browser_control': {
+                // AI wants to control the browser
+                if (data.toolCallId && data.action) {
+                  const bcCommand: BrowserControlCommand = {
+                    toolCallId: data.toolCallId,
+                    action: data.action,
+                    args: (data.args as BrowserControlCommand['args']) || {},
+                  };
+
+                  log('info', 'Received browser control command', { command: bcCommand });
+
+                  if (browserControl?.autoExecute) {
+                    // Auto-execute and send result back
+                    executeBrowserControl(bcCommand).then((result) => {
+                      sendBrowserControlResult(bcCommand.toolCallId, result);
+                    });
+                  } else if (onBrowserControl) {
+                    // Let dev handle it
+                    const result = onBrowserControl(bcCommand);
+                    if (result instanceof Promise) {
+                      result.then((r) => r && sendBrowserControlResult(bcCommand.toolCallId, r));
+                    } else if (result) {
+                      sendBrowserControlResult(bcCommand.toolCallId, result);
+                    }
+                  }
+                }
+                break;
+              }
             }
           } catch (e) {
             console.error('Error parsing WebSocket message:', e);
@@ -814,6 +1156,12 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
       maxReconnectAttempts,
       maxReconnectDelay,
       reconnectBackoffFactor,
+      browserControl,
+      onBrowserControl,
+      onUICommand,
+      executeBrowserControl,
+      executeUICommand,
+      sendBrowserControlResult,
     ]
   );
 
@@ -940,6 +1288,23 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     return { ...metricsRef.current };
   }, []);
 
+  // Capture console errors for browser control get_errors action
+  useEffect(() => {
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      consoleErrorsRef.current.push(args.map(String).join(' '));
+      // Keep only last 100 errors
+      if (consoleErrorsRef.current.length > 100) {
+        consoleErrorsRef.current = consoleErrorsRef.current.slice(-100);
+      }
+      originalError.apply(console, args);
+    };
+
+    return () => {
+      console.error = originalError;
+    };
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -968,5 +1333,11 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     setSpeakerMuted: setSpeakerMutedState,
     clearTranscripts,
     getMetrics,
+    // Browser control helpers
+    highlightElement,
+    clickElement,
+    typeIntoElement,
+    scrollTo,
+    sendBrowserControlResult,
   };
 }

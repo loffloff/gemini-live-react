@@ -1,4 +1,76 @@
 // =============================================================================
+// Browser Control Types
+// =============================================================================
+
+/** Browser control action types */
+export type BrowserControlAction =
+  | 'click'
+  | 'type'
+  | 'scroll'
+  | 'highlight'
+  | 'get_dom'
+  | 'get_errors';
+
+/** Browser control command from AI */
+export interface BrowserControlCommand {
+  toolCallId: string;
+  action: BrowserControlAction;
+  args: {
+    selector?: string;
+    text?: string;
+    message?: string;
+    direction?: 'up' | 'down' | 'left' | 'right';
+    amount?: number;
+    duration?: number;
+    clear?: boolean;
+    maxDepth?: number;
+    limit?: number;
+    confirmMessage?: string;
+  };
+}
+
+/** UI command types */
+export type UICommandType =
+  | 'highlight_element'
+  | 'show_action_button'
+  | 'update_checklist'
+  | 'think_aloud'
+  | 'ask_user'
+  | 'run_diagnostic'
+  | 'escalate_to_human';
+
+/** UI command from AI */
+export interface UICommand {
+  toolCallId: string;
+  command: UICommandType;
+  args: Record<string, unknown>;
+}
+
+/** Browser control configuration */
+export interface BrowserControlConfig {
+  /** Auto-execute browser commands (default: false) */
+  autoExecute?: boolean;
+  /** Auto-execute UI commands (default: false) */
+  autoExecuteUI?: boolean;
+  /** Custom highlight styles */
+  highlightStyle?: {
+    color?: string;
+    borderWidth?: number;
+    duration?: number;
+  };
+  /** Require confirmation for destructive actions */
+  confirmDestructive?: boolean;
+}
+
+/** Result of a browser control action */
+export interface BrowserControlResult {
+  success: boolean;
+  message?: string;
+  data?: unknown;
+  error?: string;
+}
+
+// =============================================================================
 // Screen Recording Types
 // =============================================================================
 
@@ -175,6 +247,19 @@ export type ToolCallHandler = (
 ) => Promise<unknown> | unknown;
 
 /**
+ * Callback for handling browser control commands from AI
+ * Return a result to send back, or undefined to use default handling
+ */
+export type BrowserControlHandler = (
+  command: BrowserControlCommand
+) => Promise<BrowserControlResult> | BrowserControlResult | void;
+
+/**
+ * Callback for handling UI commands from AI
+ */
+export type UICommandHandler = (command: UICommand) => void;
+
+/**
  * Configuration options for useGeminiLive hook
  */
 export interface UseGeminiLiveOptions {
@@ -277,6 +362,24 @@ export interface UseGeminiLiveOptions {
     /** Duration of silence before ending speech @default 300 */
     silenceDuration?: number;
   };
+
+  /**
+   * Browser control configuration
+   * Enables AI to manipulate DOM elements and read page state
+   */
+  browserControl?: BrowserControlConfig;
+
+  /**
+   * Callback fired when the AI sends a browser control command
+   * Return a result to send back, or undefined to let auto-execute handle it
+   */
+  onBrowserControl?: BrowserControlHandler;
+
+  /**
+   * Callback fired when the AI sends a UI command
+   * (highlight_element, show_action_button, update_checklist, etc.)
+   */
+  onUICommand?: UICommandHandler;
 }
 
 /**
@@ -390,6 +493,41 @@ export interface UseGeminiLiveReturn {
 
   /** Get connection quality metrics */
   getMetrics: () => ConnectionMetrics;
+
+  /**
+   * Highlight an element in the DOM with a visual indicator
+   * @param selector - CSS selector for the element
+   * @param message - Optional label to display with the highlight
+   * @param duration - Duration in ms before highlight disappears (default: 3000)
+   */
+  highlightElement: (selector: string, message?: string, duration?: number) => void;
+
+  /**
+   * Click an element in the DOM
+   * @param selector - CSS selector for the element to click
+   */
+  clickElement: (selector: string) => Promise<BrowserControlResult>;
+
+  /**
+   * Type text into an input element
+   * @param selector - CSS selector for the input element
+   * @param text - Text to type
+   * @param clear - Whether to clear existing value first (default: true)
+   */
+  typeIntoElement: (selector: string, text: string, clear?: boolean) => Promise<BrowserControlResult>;
+
+  /**
+   * Scroll to an element or in a direction
+   * @param target - CSS selector or direction object
+   */
+  scrollTo: (target: string | { direction: 'up' | 'down' | 'left' | 'right'; amount?: number }) => void;
+
+  /**
+   * Send a browser control result back to the AI
+   * @param toolCallId - The ID from the browser control command
+   * @param result - The result to send back
+   */
+  sendBrowserControlResult: (toolCallId: string, result: BrowserControlResult) => void;
 }
 
 /**
@@ -407,7 +545,8 @@ export type ProxyMessageType =
   | 'error'
   | 'disconnected'
   | 'tool_call'
-  | 'tool_result';
+  | 'tool_result'
+  | 'browser_control';
 
 /**
  * Message from proxy to client
@@ -429,13 +568,15 @@ export interface ProxyMessage {
   toolCallId?: string;
   toolName?: string;
   args?: Record<string, unknown>;
+  /** Browser control action (for browser_control messages) */
+  action?: BrowserControlAction;
 }
 
 /**
  * Message types sent from client to proxy
  * @internal
  */
-export type ClientMessageType = 'frame' | 'audio' | 'text' | 'tool_result' | 'setup_tools';
+export type ClientMessageType = 'frame' | 'audio' | 'text' | 'tool_result' | 'setup_tools' | 'browser_control_result';
 
 /**
  * Message from client to proxy

@@ -11,6 +11,15 @@ export type {
   ToolDefinition,
   ToolCall,
   ToolCallHandler,
+  // Browser Control types
+  BrowserControlAction,
+  BrowserControlCommand,
+  BrowserControlResult,
+  BrowserControlConfig,
+  BrowserControlHandler,
+  UICommandType,
+  UICommand,
+  UICommandHandler,
   // Screen Recording types
   UseScreenRecordingOptions,
   UseScreenRecordingReturn,
