@@ -24,17 +24,24 @@
     "hook",
     "speech",
     "ai",
-    "live-api"
+    "live-api",
+    "session-recording",
+    "workflow",
+    "automation",
+    "browser-control",
+    "element-detection",
+    "voice-assistant",
+    "conversational-ai"
   ],
-  "author": "deflectionrate",
+  "author": "loffloff",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/deflectionrate/gemini-live-react"
+    "url": "https://github.com/loffloff/gemini-live-react"
   },
-  "homepage": "https://github.com/deflectionrate/gemini-live-react#readme",
+  "homepage": "https://github.com/loffloff/gemini-live-react#readme",
   "bugs": {
-    "url": "https://github.com/deflectionrate/gemini-live-react/issues"
+    "url": "https://github.com/loffloff/gemini-live-react/issues"
   },
   "peerDependencies": {
     "react": ">=17.0.0",

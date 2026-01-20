@@ -7,6 +7,22 @@ Real-time bidirectional voice streaming with Google Gemini Live API for React.
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## Table of Contents
+
+- [Why This Exists](#why-this-exists)
+- [Quick Start](#quick-start)
+- [Features](#features)
+- [API](#api)
+- [Guides](#guides)
+  - [Screen Sharing](#screen-sharing)
+  - [Tool Calling](#tool-calling)
+  - [Voice Activity Detection](#voice-activity-detection)
+  - [Session Recording](#session-recording)
+  - [Workflow Builder](#workflow-builder)
+  - [Smart Element Detection](#smart-element-detection)
+- [Examples](#examples)
+- [Troubleshooting](#troubleshooting)
+
 ## Why This Exists
 
 Building real-time voice with Gemini Live is harder than it looks:
@@ -159,7 +175,9 @@ const {
 });
 ```
 
-## Voices
+## Guides
+
+### Voices
 
 | Voice | Style |
 |-------|-------|
@@ -172,7 +190,7 @@ const {
 
 Change voice via proxy query param: `?voice=Kore`
 
-## Screen Sharing
+### Screen Sharing
 
 ```tsx
 const videoRef = useRef<HTMLVideoElement>(null);
@@ -187,7 +205,7 @@ const startWithScreen = async () => {
 
 Frames are sent at 1 FPS, scaled to max 1024px width.
 
-## Mobile Support
+### Mobile Support
 
 iOS Safari and some mobile browsers don't support screen recording. The library exports utilities for detection and fallback:
 
@@ -226,7 +244,7 @@ const startWithVideo = async () => {
 
 See [docs/MOBILE.md](./docs/MOBILE.md) for the complete mobile guide.
 
-## Tool Calling
+### Tool Calling
 
 Let AI execute functions and get results back - perfect for building agents:
 
@@ -255,7 +273,7 @@ const { connect } = useGeminiLive({
 });
 ```
 
-## Voice Activity Detection (VAD)
+### Voice Activity Detection (VAD)
 
 Only send audio when the user is speaking - reduces bandwidth and improves latency:
 
@@ -279,7 +297,7 @@ const { isUserSpeaking } = useGeminiLive({
 {isUserSpeaking && <div className="recording-indicator" />}
 ```
 
-## Debug Mode
+### Debug Mode
 
 Enable logging to diagnose connection issues:
 
@@ -296,7 +314,7 @@ useGeminiLive({
 });
 ```
 
-## Session Recording
+### Session Recording
 
 Record everything that happens in a session - transcripts, audio metadata, tool calls, browser controls - and export for debugging or training:
 
@@ -334,7 +352,7 @@ const url = URL.createObjectURL(blob);
 
 **Event Types**: `connection_change`, `transcript`, `audio_chunk`, `frame_capture`, `tool_call`, `tool_result`, `browser_control`, `ui_command`, `dom_snapshot`, `error`
 
-## Workflow Builder
+### Workflow Builder
 
 Define reusable multi-step automations that AI can execute - like macros, but AI-aware:
 
@@ -393,7 +411,7 @@ console.log(result.history); // Step-by-step execution log
 
 **Step Types**: `browser_control`, `wait`, `condition`, `ai_prompt`
 
-## Smart Element Detection
+### Smart Element Detection
 
 Detect interactive elements on the page without needing CSS selectors - useful for dynamic UIs:
 
@@ -449,8 +467,16 @@ await clickDetectedElement('det_123');
 ## Examples
 
 See [`examples/`](./examples) for:
-- Basic voice chat
-- Screen share assistant
+- [Basic voice chat](./examples/basic-voice-chat) - Minimal voice conversation
+- [Screen share assistant](./examples/screen-share-assistant) - AI that can see your screen
+
+## Troubleshooting
+
+Having issues? Check [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for solutions to common problems:
+- Audio not playing or choppy
+- Microphone not working
+- Connection issues
+- Transcript problems
 
 ## Roadmap
 
@@ -466,12 +492,6 @@ See [`examples/`](./examples) for:
 - [ ] Vue hook (`@gemini-live/vue`)
 - [ ] Cloudflare Workers proxy
 - [ ] Vercel Edge proxy
-
-## Contributing
-
-PRs welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
-
-Please read our [Code of Conduct](./CODE_OF_CONDUCT.md) before participating.
 
 ## License
 
