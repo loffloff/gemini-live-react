@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Session Recording & Replay** - Record everything that happens in a session:
+  - `startRecording()` / `stopRecording()` / `exportRecording()` methods
+  - `isRecording` state
+  - `recording` config option with filters for audio, frames, DOM snapshots
+  - `onRecordingEvent` callback for real-time event streaming
+  - 10 event types: `connection_change`, `transcript`, `audio_chunk`, `frame_capture`, `tool_call`, `tool_result`, `browser_control`, `ui_command`, `dom_snapshot`, `error`
+  - Export as JSON blob for debugging, analysis, or training
+- **Workflow Builder** - Define multi-step automations AI can execute:
+  - `registerWorkflow()` / `executeWorkflow()` methods
+  - `pauseWorkflow()` / `resumeWorkflow()` / `cancelWorkflow()` controls
+  - `workflowExecution` state tracking
+  - 4 step types: `browser_control`, `wait`, `condition`, `ai_prompt`
+  - Branching logic with `next` arrays and `onError` handlers
+  - Variable passing between steps
+- **Smart Element Detection** - Detect interactive elements without selectors:
+  - `detectElements()` returns all visible interactive elements
+  - `clickDetectedElement(id)` clicks by element ID
+  - `detectedElements` / `isDetecting` states
+  - `smartDetection` config with `highlightDetections` option
+  - Detects: buttons, inputs, links, text, images
+  - Auto-generates selectors, falls back to coordinate clicks
+
 ## [0.2.1] - 2025-01-16
 
 ### Added

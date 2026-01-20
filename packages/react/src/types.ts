@@ -183,6 +183,131 @@ export interface UseScreenRecordingReturn {
 }
 
 // =============================================================================
+// Session Recording Types
+// =============================================================================
+
+/** Session recording event types */
+export type SessionEventType =
+  | 'connection_change'
+  | 'transcript'
+  | 'audio_chunk'
+  | 'frame_capture'
+  | 'tool_call'
+  | 'tool_result'
+  | 'browser_control'
+  | 'ui_command'
+  | 'dom_snapshot'
+  | 'error';
+
+/** Individual session event */
+export interface SessionEvent {
+  type: SessionEventType;
+  timestamp: number;
+  data: unknown;
+}
+
+/** Complete session recording */
+export interface SessionRecording {
+  id: string;
+  startTime: number;
+  endTime?: number;
+  events: SessionEvent[];
+  metadata?: Record<string, unknown>;
+}
+
+/** Recording configuration */
+export interface RecordingConfig {
+  /** Record audio streams (default: true) */
+  audio?: boolean;
+  /** Record screen frames (default: true) */
+  frames?: boolean;
+  /** Record DOM snapshots (default: true) */
+  domSnapshots?: boolean;
+  /** Snapshot interval in ms (default: 5000) */
+  snapshotInterval?: number;
+  /** Max recording duration in ms (default: unlimited) */
+  maxDuration?: number;
+}
+
+// =============================================================================
+// Workflow Builder Types
+// =============================================================================
+
+/** Single step in a workflow */
+export interface WorkflowStep {
+  id: string;
+  type: 'browser_control' | 'wait' | 'condition' | 'ai_prompt';
+  action?: BrowserControlAction;
+  args?: Record<string, unknown>;
+  /** Wait duration in ms */
+  waitMs?: number;
+  /** Condition to check before proceeding */
+  condition?: {
+    selector: string;
+    check: 'exists' | 'visible' | 'contains_text';
+    value?: string;
+  };
+  /** Prompt for AI to execute */
+  prompt?: string;
+  /** Next step ID (or array for branching) */
+  next?: string | string[];
+  /** Error handler step ID */
+  onError?: string;
+}
+
+/** Complete workflow definition */
+export interface Workflow {
+  id: string;
+  name: string;
+  description?: string;
+  entryPoint: string;
+  steps: Record<string, WorkflowStep>;
+  variables?: Record<string, unknown>;
+}
+
+/** Workflow execution state */
+export interface WorkflowExecution {
+  workflowId: string;
+  status: 'running' | 'paused' | 'completed' | 'failed';
+  currentStepId: string;
+  variables: Record<string, unknown>;
+  history: Array<{
+    stepId: string;
+    result: BrowserControlResult;
+    timestamp: number;
+  }>;
+  error?: string;
+}
+
+// =============================================================================
+// Smart Element Detection Types
+// =============================================================================
+
+/** Detected element from visual analysis */
+export interface DetectedElement {
+  id: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  type: 'button' | 'input' | 'link' | 'text' | 'image' | 'unknown';
+  text?: string;
+  selector?: string;
+  confidence: number;
+  description?: string;
+}
+
+/** Detection configuration */
+export interface SmartDetectionConfig {
+  enabled?: boolean;
+  autoDetect?: boolean;
+  highlightDetections?: boolean;
+}
+
+/** Detection result */
+export interface DetectionResult {
+  elements: DetectedElement[];
+  timestamp: number;
+}
+
+// =============================================================================
 // Gemini Live Types
 // =============================================================================
 
@@ -380,6 +505,21 @@ export interface UseGeminiLiveOptions {
    * (highlight_element, show_action_button, update_checklist, etc.)
    */
   onUICommand?: UICommandHandler;
+
+  /**
+   * Enable session recording
+   */
+  recording?: RecordingConfig;
+
+  /**
+   * Callback when recording event occurs
+   */
+  onRecordingEvent?: (event: SessionEvent) => void;
+
+  /**
+   * Smart element detection configuration
+   */
+  smartDetection?: SmartDetectionConfig;
 }
 
 /**
@@ -528,6 +668,60 @@ export interface UseGeminiLiveReturn {
    * @param result - The result to send back
    */
   sendBrowserControlResult: (toolCallId: string, result: BrowserControlResult) => void;
+
+  // =============================================================================
+  // Session Recording
+  // =============================================================================
+
+  /** Start recording the session */
+  startRecording: () => void;
+
+  /** Stop recording and return data */
+  stopRecording: () => SessionRecording;
+
+  /** Whether currently recording */
+  isRecording: boolean;
+
+  /** Export recording as JSON blob */
+  exportRecording: () => Blob;
+
+  // =============================================================================
+  // Workflow Builder
+  // =============================================================================
+
+  /** Register a workflow */
+  registerWorkflow: (workflow: Workflow) => void;
+
+  /** Execute a workflow by ID */
+  executeWorkflow: (id: string, variables?: Record<string, unknown>) => Promise<WorkflowExecution>;
+
+  /** Pause current workflow */
+  pauseWorkflow: () => void;
+
+  /** Resume paused workflow */
+  resumeWorkflow: () => void;
+
+  /** Cancel current workflow */
+  cancelWorkflow: () => void;
+
+  /** Current workflow state */
+  workflowExecution: WorkflowExecution | null;
+
+  // =============================================================================
+  // Smart Element Detection
+  // =============================================================================
+
+  /** Request AI to detect elements on current screen */
+  detectElements: () => Promise<DetectionResult>;
+
+  /** Click detected element by ID */
+  clickDetectedElement: (elementId: string) => Promise<BrowserControlResult>;
+
+  /** Latest detection results */
+  detectedElements: DetectedElement[];
+
+  /** Detection in progress */
+  isDetecting: boolean;
 }
 
 /**

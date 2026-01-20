@@ -26,6 +26,19 @@ export type {
   RecordingState,
   RecordingResult,
   TimestampedScreenshot,
+  // Session Recording types
+  SessionEventType,
+  SessionEvent,
+  SessionRecording,
+  RecordingConfig,
+  // Workflow Builder types
+  WorkflowStep,
+  Workflow,
+  WorkflowExecution,
+  // Smart Element Detection types
+  DetectedElement,
+  SmartDetectionConfig,
+  DetectionResult,
 } from './types';
 
 // Browser capability detection utilities

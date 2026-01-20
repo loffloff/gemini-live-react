@@ -84,6 +84,9 @@ function App() {
 - **Debug mode** - Built-in logging for diagnosing issues
 - **Auto-reconnect** - Configurable exponential backoff
 - **Session resumption** - Pick up where you left off
+- **Session Recording** - Record everything, export as JSON, replay for debugging
+- **Workflow Builder** - Define multi-step automations AI can execute
+- **Smart Element Detection** - AI identifies clickable elements without selectors
 - **TypeScript** - Full type definitions
 
 ## Packages
@@ -146,6 +149,13 @@ const {
   // Audio tuning
   minBufferMs?: number,          // Default: 200
   transcriptDebounceMs?: number, // Default: 1500
+
+  // Session Recording
+  recording?: RecordingConfig,   // Enable recording
+  onRecordingEvent?: (event) => void,
+
+  // Smart Detection
+  smartDetection?: SmartDetectionConfig,
 });
 ```
 
@@ -286,6 +296,135 @@ useGeminiLive({
 });
 ```
 
+## Session Recording
+
+Record everything that happens in a session - transcripts, audio metadata, tool calls, browser controls - and export for debugging or training:
+
+```tsx
+const {
+  startRecording,
+  stopRecording,
+  exportRecording,
+  isRecording,
+} = useGeminiLive({
+  proxyUrl: '...',
+  recording: {
+    audio: true,        // Record audio metadata
+    frames: true,       // Record frame captures
+    domSnapshots: true, // Periodic DOM snapshots
+    snapshotInterval: 5000, // Every 5 seconds
+  },
+  onRecordingEvent: (event) => {
+    console.log(event.type, event.timestamp, event.data);
+  },
+});
+
+// Start recording
+startRecording();
+
+// Later: stop and get data
+const recording = stopRecording();
+console.log(recording.events); // All captured events
+
+// Or export as JSON file
+const blob = exportRecording();
+const url = URL.createObjectURL(blob);
+// Download or analyze
+```
+
+**Event Types**: `connection_change`, `transcript`, `audio_chunk`, `frame_capture`, `tool_call`, `tool_result`, `browser_control`, `ui_command`, `dom_snapshot`, `error`
+
+## Workflow Builder
+
+Define reusable multi-step automations that AI can execute - like macros, but AI-aware:
+
+```tsx
+const {
+  registerWorkflow,
+  executeWorkflow,
+  pauseWorkflow,
+  resumeWorkflow,
+  cancelWorkflow,
+  workflowExecution,
+} = useGeminiLive({ proxyUrl: '...' });
+
+// Define a workflow
+registerWorkflow({
+  id: 'login-flow',
+  name: 'Login to Dashboard',
+  entryPoint: 'click-login',
+  steps: {
+    'click-login': {
+      id: 'click-login',
+      type: 'browser_control',
+      action: 'click',
+      args: { selector: '#login-button' },
+      next: 'wait-modal',
+    },
+    'wait-modal': {
+      id: 'wait-modal',
+      type: 'wait',
+      waitMs: 500,
+      next: 'fill-email',
+    },
+    'fill-email': {
+      id: 'fill-email',
+      type: 'browser_control',
+      action: 'type',
+      args: { selector: '#email', text: 'user@example.com' },
+      next: 'check-next-button',
+    },
+    'check-next-button': {
+      id: 'check-next-button',
+      type: 'condition',
+      condition: { selector: '#next-btn', check: 'visible' },
+      next: ['click-next', 'error-handler'], // Branching
+      onError: 'error-handler',
+    },
+    // ...
+  },
+});
+
+// Execute it
+const result = await executeWorkflow('login-flow', { customVar: 'value' });
+console.log(result.status); // 'completed' | 'failed'
+console.log(result.history); // Step-by-step execution log
+```
+
+**Step Types**: `browser_control`, `wait`, `condition`, `ai_prompt`
+
+## Smart Element Detection
+
+Detect interactive elements on the page without needing CSS selectors - useful for dynamic UIs:
+
+```tsx
+const {
+  detectElements,
+  clickDetectedElement,
+  detectedElements,
+  isDetecting,
+} = useGeminiLive({
+  proxyUrl: '...',
+  smartDetection: {
+    highlightDetections: true, // Visual feedback
+  },
+});
+
+// Scan the page
+const result = await detectElements();
+console.log(result.elements);
+// [
+//   { id: 'det_123', type: 'button', text: 'Submit', bounds: {...}, selector: '#submit-btn', confidence: 1.0 },
+//   { id: 'det_124', type: 'link', text: 'Learn more', bounds: {...}, selector: 'a.learn-more', confidence: 1.0 },
+//   ...
+// ]
+
+// Click by element ID (uses selector if available, falls back to coordinates)
+await clickDetectedElement('det_123');
+```
+
+**Detected Types**: `button`, `input`, `link`, `text`, `image`, `unknown`
+
 ## How It Works
 
 ```
@@ -320,6 +459,9 @@ See [`examples/`](./examples) for:
 - [x] Debug logging mode
 - [x] Connection state machine
 - [x] Configurable reconnection
+- [x] Session Recording & Replay
+- [x] Workflow Builder
+- [x] Smart Element Detection
 - [ ] Vanilla JS core (`@gemini-live/core`)
 - [ ] Vue hook (`@gemini-live/vue`)
 - [ ] Cloudflare Workers proxy

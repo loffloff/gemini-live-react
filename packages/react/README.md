@@ -91,6 +91,20 @@ function VoiceChat() {
 | `setSpeakerMuted` | `(muted: boolean) => void` | Set speaker mute state |
 | `clearTranscripts` | `() => void` | Clear transcript history |
 | `getMetrics` | `() => ConnectionMetrics` | Get connection quality metrics |
+| `startRecording` | `() => void` | Start session recording |
+| `stopRecording` | `() => SessionRecording` | Stop recording and get data |
+| `isRecording` | `boolean` | Currently recording |
+| `exportRecording` | `() => Blob` | Export recording as JSON blob |
+| `registerWorkflow` | `(workflow: Workflow) => void` | Register a workflow |
+| `executeWorkflow` | `(id: string, vars?) => Promise<WorkflowExecution>` | Run a workflow |
+| `pauseWorkflow` | `() => void` | Pause current workflow |
+| `resumeWorkflow` | `() => void` | Resume paused workflow |
+| `cancelWorkflow` | `() => void` | Cancel current workflow |
+| `workflowExecution` | `WorkflowExecution \| null` | Current workflow state |
+| `detectElements` | `() => Promise<DetectionResult>` | Detect interactive elements |
+| `clickDetectedElement` | `(id: string) => Promise<BrowserControlResult>` | Click detected element |
+| `detectedElements` | `DetectedElement[]` | Latest detection results |
+| `isDetecting` | `boolean` | Detection in progress |
 
 ### Types
 
@@ -116,6 +130,50 @@ interface ConnectionMetrics {
   reconnectCount: number;
   lastConnectedAt: number | null;
   totalConnectedTime: number;
+}
+
+// Session Recording
+interface SessionRecording {
+  id: string;
+  startTime: number;
+  endTime?: number;
+  events: SessionEvent[];
+}
+
+interface SessionEvent {
+  type: SessionEventType; // 'transcript' | 'audio_chunk' | 'tool_call' | ...
+  timestamp: number;
+  data: unknown;
+}
+
+// Workflow Builder
+interface Workflow {
+  id: string;
+  name: string;
+  entryPoint: string;
+  steps: Record<string, WorkflowStep>;
+}
+
+interface WorkflowStep {
+  id: string;
+  type: 'browser_control' | 'wait' | 'condition' | 'ai_prompt';
+  action?: BrowserControlAction;
+  args?: Record<string, unknown>;
+  waitMs?: number;
+  condition?: { selector: string; check: 'exists' | 'visible' | 'contains_text'; value?: string };
+  prompt?: string;
+  next?: string | string[];
+  onError?: string;
+}
+
+// Smart Element Detection
+interface DetectedElement {
+  id: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  type: 'button' | 'input' | 'link' | 'text' | 'image' | 'unknown';
+  text?: string;
+  selector?: string;
+  confidence: number;
 }
 ```
 

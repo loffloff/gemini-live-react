@@ -12,6 +12,13 @@ import type {
   BrowserControlResult,
   UICommand,
   UICommandType,
+  SessionEvent,
+  SessionRecording,
+  Workflow,
+  WorkflowStep,
+  WorkflowExecution,
+  DetectedElement,
+  DetectionResult,
 } from './types';
 
 /**
@@ -57,6 +64,9 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     browserControl,
     onBrowserControl,
     onUICommand,
+    recording,
+    onRecordingEvent,
+    smartDetection,
   } = options;
 
   // Reconnection config with defaults
@@ -141,6 +151,29 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     lastConnectedAt: null,
     totalConnectedTime: 0,
   });
+
+  // =============================================================================
+  // Session Recording State
+  // =============================================================================
+  const [isRecording, setIsRecording] = useState(false);
+  const recordingEventsRef = useRef<SessionEvent[]>([]);
+  const recordingStartRef = useRef<number | null>(null);
+  const recordingIdRef = useRef<string | null>(null);
+  const domSnapshotIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // =============================================================================
+  // Workflow Builder State
+  // =============================================================================
+  const [workflowExecution, setWorkflowExecution] = useState<WorkflowExecution | null>(null);
+  const workflowRegistryRef = useRef<Map<string, Workflow>>(new Map());
+  const workflowPausedRef = useRef(false);
+  const workflowCancelledRef = useRef(false);
+
+  // =============================================================================
+  // Smart Element Detection State
+  // =============================================================================
+  const [detectedElements, setDetectedElements] = useState<DetectedElement[]>([]);
+  const [isDetecting, setIsDetecting] = useState(false);
 
   // Calculate min buffer samples based on minBufferMs (at 24kHz source rate)
   const minBufferSamples = Math.floor((minBufferMs / 1000) * 24000);
@@ -718,6 +751,277 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     []
   );
 
+  // =============================================================================
+  // Session Recording Engine
+  // =============================================================================
+
+  /**
+   * Record a session event
+   */
+  const recordEvent = useCallback(
+    (type: SessionEvent['type'], data: unknown) => {
+      if (!isRecording || !recordingStartRef.current) return;
+
+      // Check recording config filters
+      if (type === 'audio_chunk' && recording?.audio === false) return;
+      if (type === 'frame_capture' && recording?.frames === false) return;
+      if (type === 'dom_snapshot' && recording?.domSnapshots === false) return;
+
+      const event: SessionEvent = {
+        type,
+        timestamp: Date.now() - recordingStartRef.current,
+        data,
+      };
+
+      recordingEventsRef.current.push(event);
+      onRecordingEvent?.(event);
+
+      // Check max duration
+      if (recording?.maxDuration && event.timestamp >= recording.maxDuration) {
+        // Auto-stop recording
+        setIsRecording(false);
+      }
+    },
+    [isRecording, recording, onRecordingEvent]
+  );
+
+  /**
+   * Start recording the session
+   */
+  const startRecording = useCallback(() => {
+    if (isRecording) return;
+
+    recordingIdRef.current = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    recordingStartRef.current = Date.now();
+    recordingEventsRef.current = [];
+    setIsRecording(true);
+
+    log('info', 'Session recording started', { id: recordingIdRef.current });
+
+    // Start DOM snapshot interval if enabled
+    const snapshotInterval = recording?.snapshotInterval ?? 5000;
+    if (recording?.domSnapshots !== false) {
+      domSnapshotIntervalRef.current = setInterval(() => {
+        const dom = serializeDOM(document.body, 3);
+        recordEvent('dom_snapshot', { dom });
+      }, snapshotInterval);
+    }
+
+    // Record initial connection state
+    recordEvent('connection_change', { connected: isConnected, state: connectionState });
+  }, [isRecording, recording, log, serializeDOM, recordEvent, isConnected, connectionState]);
+
+  /**
+   * Stop recording and return the recording data
+   */
+  const stopRecording = useCallback((): SessionRecording => {
+    if (domSnapshotIntervalRef.current) {
+      clearInterval(domSnapshotIntervalRef.current);
+      domSnapshotIntervalRef.current = null;
+    }
+
+    const endTime = Date.now();
+    const startTime = recordingStartRef.current || endTime;
+    const recordingData: SessionRecording = {
+      id: recordingIdRef.current || `rec_${Date.now()}`,
+      startTime,
+      endTime,
+      events: [...recordingEventsRef.current],
+    };
+
+    log('info', 'Session recording stopped', {
+      id: recordingData.id,
+      eventCount: recordingData.events.length,
+      duration: endTime - startTime,
+    });
+
+    setIsRecording(false);
+    recordingEventsRef.current = [];
+    recordingStartRef.current = null;
+    recordingIdRef.current = null;
+
+    return recordingData;
+  }, [log]);
+
+  /**
+   * Export the current recording as a JSON blob
+   */
+  const exportRecording = useCallback((): Blob => {
+    const recordingData: SessionRecording = {
+      id: recordingIdRef.current || `rec_${Date.now()}`,
+      startTime: recordingStartRef.current || Date.now(),
+      endTime: isRecording ? undefined : Date.now(),
+      events: [...recordingEventsRef.current],
+    };
+
+    return new Blob([JSON.stringify(recordingData, null, 2)], {
+      type: 'application/json',
+    });
+  }, [isRecording]);
+
+  // =============================================================================
+  // Smart Element Detection Engine
+  // =============================================================================
+
+  /**
+   * Detect elements on the current screen
+   */
+  const detectElements = useCallback(async (): Promise<DetectionResult> => {
+    setIsDetecting(true);
+    log('info', 'Starting element detection');
+
+    try {
+      // Collect all interactive elements from the DOM
+      const interactiveSelectors = [
+        'button',
+        'a[href]',
+        'input',
+        'textarea',
+        'select',
+        '[role="button"]',
+        '[onclick]',
+        '[tabindex]:not([tabindex="-1"])',
+      ];
+
+      const elements: DetectedElement[] = [];
+      const seenBounds = new Set<string>();
+
+      for (const selector of interactiveSelectors) {
+        const domElements = document.querySelectorAll(selector);
+        domElements.forEach((el, index) => {
+          const rect = (el as HTMLElement).getBoundingClientRect();
+
+          // Skip hidden or off-screen elements
+          if (rect.width === 0 || rect.height === 0) return;
+          if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+          if (rect.right < 0 || rect.left > window.innerWidth) return;
+
+          // Skip duplicates based on bounds
+          const boundsKey = `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}`;
+          if (seenBounds.has(boundsKey)) return;
+          seenBounds.add(boundsKey);
+
+          // Determine element type
+          let type: DetectedElement['type'] = 'unknown';
+          const tagName = el.tagName.toLowerCase();
+          if (tagName === 'button' || el.getAttribute('role') === 'button') {
+            type = 'button';
+          } else if (tagName === 'a') {
+            type = 'link';
+          } else if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+            type = 'input';
+          } else if (tagName === 'img') {
+            type = 'image';
+          }
+
+          // Generate selector
+          let selectorStr = '';
+          if (el.id) {
+            selectorStr = `#${el.id}`;
+          } else if (el.className && typeof el.className === 'string') {
+            const classes = el.className.trim().split(/\s+/).slice(0, 2).join('.');
+            selectorStr = classes ? `${tagName}.${classes}` : tagName;
+          } else {
+            selectorStr = `${tagName}:nth-of-type(${index + 1})`;
+          }
+
+          // Get text content
+          const text = (el as HTMLElement).innerText?.trim().slice(0, 100) ||
+                       el.getAttribute('aria-label') ||
+                       el.getAttribute('title') ||
+                       (el as HTMLInputElement).placeholder ||
+                       '';
+
+          elements.push({
+            id: `det_${Date.now()}_${elements.length}`,
+            bounds: {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            },
+            type,
+            text: text || undefined,
+            selector: selectorStr,
+            confidence: 1.0, // DOM-based detection is deterministic
+            description: `${type}: ${text || selectorStr}`,
+          });
+        });
+      }
+
+      // Highlight detected elements if configured
+      if (smartDetection?.highlightDetections) {
+        elements.forEach((element) => {
+          if (element.selector) {
+            highlightElement(element.selector, element.description, 2000);
+          }
+        });
+      }
+
+      const result: DetectionResult = {
+        elements,
+        timestamp: Date.now(),
+      };
+
+      setDetectedElements(elements);
+      setIsDetecting(false);
+
+      log('info', 'Element detection complete', { count: elements.length });
+
+      // Record detection
+      recordEvent('tool_result', { type: 'element_detection', count: elements.length });
+
+      return result;
+    } catch (err) {
+      log('error', 'Element detection failed', { error: err });
+      setIsDetecting(false);
+      return { elements: [], timestamp: Date.now() };
+    }
+  }, [log, smartDetection, highlightElement, recordEvent]);
+
+  /**
+   * Click a detected element by ID
+   */
+  const clickDetectedElement = useCallback(
+    async (elementId: string): Promise<BrowserControlResult> => {
+      const element = detectedElements.find((e) => e.id === elementId);
+      if (!element) {
+        return { success: false, error: `Detected element not found: ${elementId}` };
+      }
+
+      // Try selector first
+      if (element.selector) {
+        const result = await clickElement(element.selector);
+        if (result.success) {
+          recordEvent('browser_control', {
+            action: 'click',
+            elementId,
+            selector: element.selector,
+          });
+          return result;
+        }
+      }
+
+      // Fallback to coordinate click
+      const centerX = element.bounds.x + element.bounds.width / 2;
+      const centerY = element.bounds.y + element.bounds.height / 2;
+      const targetEl = document.elementFromPoint(centerX, centerY);
+
+      if (targetEl) {
+        (targetEl as HTMLElement).click();
+        recordEvent('browser_control', {
+          action: 'click',
+          elementId,
+          coordinates: { x: centerX, y: centerY },
+        });
+        return { success: true, message: `Clicked element at (${centerX}, ${centerY})` };
+      }
+
+      return { success: false, error: 'Could not find element to click' };
+    },
+    [detectedElements, clickElement, recordEvent]
+  );
+
   /**
    * Send a browser control result back to the AI
    */
@@ -826,6 +1130,255 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     [highlightElement, log]
   );
 
+  // =============================================================================
+  // Workflow Builder Engine
+  // =============================================================================
+
+  /**
+   * Register a workflow
+   */
+  const registerWorkflow = useCallback((workflow: Workflow) => {
+    workflowRegistryRef.current.set(workflow.id, workflow);
+    log('info', 'Workflow registered', { id: workflow.id, name: workflow.name });
+  }, [log]);
+
+  /**
+   * Check a workflow condition
+   */
+  const checkCondition = useCallback(
+    (condition: WorkflowStep['condition']): boolean => {
+      if (!condition) return true;
+
+      const element = document.querySelector(condition.selector);
+      if (!element) return condition.check === 'exists' ? false : false;
+
+      switch (condition.check) {
+        case 'exists':
+          return true;
+        case 'visible': {
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        }
+        case 'contains_text':
+          return element.textContent?.includes(condition.value || '') ?? false;
+        default:
+          return false;
+      }
+    },
+    []
+  );
+
+  /**
+   * Execute a single workflow step
+   */
+  const executeWorkflowStep = useCallback(
+    async (
+      step: WorkflowStep,
+      variables: Record<string, unknown>
+    ): Promise<{ result: BrowserControlResult; nextStepId?: string }> => {
+      // Check condition if present
+      if (step.condition && !checkCondition(step.condition)) {
+        return {
+          result: { success: false, error: 'Condition not met' },
+          nextStepId: step.onError,
+        };
+      }
+
+      switch (step.type) {
+        case 'browser_control': {
+          if (!step.action) {
+            return { result: { success: false, error: 'No action specified' } };
+          }
+          const cmd: BrowserControlCommand = {
+            toolCallId: `wf_${step.id}_${Date.now()}`,
+            action: step.action,
+            args: (step.args || {}) as BrowserControlCommand['args'],
+          };
+          const result = await executeBrowserControl(cmd);
+          return {
+            result,
+            nextStepId: result.success
+              ? (Array.isArray(step.next) ? step.next[0] : step.next)
+              : step.onError,
+          };
+        }
+
+        case 'wait': {
+          await new Promise((resolve) => setTimeout(resolve, step.waitMs || 1000));
+          return {
+            result: { success: true, message: `Waited ${step.waitMs}ms` },
+            nextStepId: Array.isArray(step.next) ? step.next[0] : step.next,
+          };
+        }
+
+        case 'condition': {
+          const conditionMet = checkCondition(step.condition);
+          const nextSteps = Array.isArray(step.next) ? step.next : [step.next];
+          return {
+            result: { success: true, data: { conditionMet } },
+            nextStepId: conditionMet ? nextSteps[0] : (nextSteps[1] || step.onError),
+          };
+        }
+
+        case 'ai_prompt': {
+          if (step.prompt && socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(
+              JSON.stringify({
+                type: 'text',
+                text: step.prompt,
+              })
+            );
+          }
+          return {
+            result: { success: true, message: 'AI prompt sent' },
+            nextStepId: Array.isArray(step.next) ? step.next[0] : step.next,
+          };
+        }
+
+        default:
+          return { result: { success: false, error: `Unknown step type: ${step.type}` } };
+      }
+    },
+    [checkCondition, executeBrowserControl]
+  );
+
+  /**
+   * Execute a workflow by ID
+   */
+  const executeWorkflow = useCallback(
+    async (id: string, initialVariables?: Record<string, unknown>): Promise<WorkflowExecution> => {
+      const workflow = workflowRegistryRef.current.get(id);
+      if (!workflow) {
+        const execution: WorkflowExecution = {
+          workflowId: id,
+          status: 'failed',
+          currentStepId: '',
+          variables: {},
+          history: [],
+          error: `Workflow not found: ${id}`,
+        };
+        setWorkflowExecution(execution);
+        return execution;
+      }
+
+      workflowPausedRef.current = false;
+      workflowCancelledRef.current = false;
+
+      const variables = { ...workflow.variables, ...initialVariables };
+      const execution: WorkflowExecution = {
+        workflowId: id,
+        status: 'running',
+        currentStepId: workflow.entryPoint,
+        variables,
+        history: [],
+      };
+
+      setWorkflowExecution(execution);
+      log('info', 'Workflow execution started', { id, entryPoint: workflow.entryPoint });
+
+      // Record workflow start
+      recordEvent('tool_call', { type: 'workflow_start', workflowId: id });
+
+      let currentStepId: string | undefined = workflow.entryPoint;
+
+      while (currentStepId && !workflowCancelledRef.current) {
+        // Check for pause
+        while (workflowPausedRef.current && !workflowCancelledRef.current) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        if (workflowCancelledRef.current) break;
+
+        const step = workflow.steps[currentStepId];
+        if (!step) {
+          execution.status = 'failed';
+          execution.error = `Step not found: ${currentStepId}`;
+          break;
+        }
+
+        execution.currentStepId = currentStepId;
+        setWorkflowExecution({ ...execution });
+
+        const { result, nextStepId } = await executeWorkflowStep(step, variables);
+
+        execution.history.push({
+          stepId: currentStepId,
+          result,
+          timestamp: Date.now(),
+        });
+
+        // Record step execution
+        recordEvent('tool_result', {
+          type: 'workflow_step',
+          stepId: currentStepId,
+          result,
+        });
+
+        if (!result.success && !step.onError) {
+          execution.status = 'failed';
+          execution.error = result.error;
+          break;
+        }
+
+        currentStepId = nextStepId;
+      }
+
+      if (workflowCancelledRef.current) {
+        execution.status = 'failed';
+        execution.error = 'Workflow cancelled';
+      } else if (execution.status === 'running') {
+        execution.status = 'completed';
+      }
+
+      setWorkflowExecution({ ...execution });
+      log('info', 'Workflow execution finished', {
+        id,
+        status: execution.status,
+        stepsExecuted: execution.history.length,
+      });
+
+      return execution;
+    },
+    [log, executeWorkflowStep, recordEvent]
+  );
+
+  /**
+   * Pause the current workflow
+   */
+  const pauseWorkflow = useCallback(() => {
+    if (workflowExecution?.status === 'running') {
+      workflowPausedRef.current = true;
+      setWorkflowExecution((prev) =>
+        prev ? { ...prev, status: 'paused' } : null
+      );
+      log('info', 'Workflow paused');
+    }
+  }, [workflowExecution, log]);
+
+  /**
+   * Resume a paused workflow
+   */
+  const resumeWorkflow = useCallback(() => {
+    if (workflowExecution?.status === 'paused') {
+      workflowPausedRef.current = false;
+      setWorkflowExecution((prev) =>
+        prev ? { ...prev, status: 'running' } : null
+      );
+      log('info', 'Workflow resumed');
+    }
+  }, [workflowExecution, log]);
+
+  /**
+   * Cancel the current workflow
+   */
+  const cancelWorkflow = useCallback(() => {
+    if (workflowExecution?.status === 'running' || workflowExecution?.status === 'paused') {
+      workflowCancelledRef.current = true;
+      workflowPausedRef.current = false;
+      log('info', 'Workflow cancellation requested');
+    }
+  }, [workflowExecution, log]);
+
   /**
    * Connect to the Gemini Live proxy
    */
@@ -880,12 +1433,26 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
 
             log('verbose', 'Received message', { type: data.type });
 
+            // Inline recording helper that uses refs directly
+            const record = (type: SessionEvent['type'], eventData: unknown) => {
+              if (recordingStartRef.current) {
+                const evt: SessionEvent = {
+                  type,
+                  timestamp: Date.now() - recordingStartRef.current,
+                  data: eventData,
+                };
+                recordingEventsRef.current.push(evt);
+                onRecordingEvent?.(evt);
+              }
+            };
+
             switch (data.type) {
               case 'setup_complete':
                 log('info', 'Setup complete, starting audio capture');
                 metricsRef.current.lastConnectedAt = Date.now();
                 setConnectionState('connected');
                 onConnectionChange?.(true);
+                record('connection_change', { connected: true });
                 if (videoRef.current) {
                   startFrameCapture();
                 }
@@ -905,6 +1472,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
               case 'audio':
                 if (data.data && data.mimeType) {
                   metricsRef.current.audioChunksReceived++;
+                  record('audio_chunk', { mimeType: data.mimeType, size: data.data.length });
                   playAudio(data.data, data.mimeType);
                 }
                 break;
@@ -925,6 +1493,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                     const finalText = inputTranscriptBufferRef.current.trim();
                     if (finalText) {
                       addTranscript('user', finalText);
+                      record('transcript', { role: 'user', text: finalText });
                       inputTranscriptBufferRef.current = '';
                     }
                     // Clear streaming state after finalizing
@@ -949,6 +1518,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                     const finalText = outputTranscriptBufferRef.current.trim();
                     if (finalText) {
                       addTranscript('assistant', finalText);
+                      record('transcript', { role: 'assistant', text: finalText });
                       outputTranscriptBufferRef.current = '';
                     }
                     // Clear streaming state after finalizing
@@ -964,6 +1534,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
               case 'error':
                 const errorMsg = data.message ?? 'Unknown error';
                 log('error', 'Received error', { message: errorMsg });
+                record('error', { message: errorMsg });
                 setError(errorMsg);
                 setConnectionState('error');
                 onError?.(errorMsg);
@@ -971,6 +1542,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
 
               case 'disconnected':
                 log('info', 'Server disconnected', { reason: data.reason });
+                record('connection_change', { connected: false, reason: data.reason });
                 setConnectionState('disconnected');
                 onConnectionChange?.(false);
                 stopFrameCapture();
@@ -998,6 +1570,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                   };
 
                   log('info', 'Received UI command', { command: uiCommand });
+                  record('ui_command', { command: uiCommand.command, args: uiCommand.args });
 
                   if (browserControl?.autoExecuteUI) {
                     executeUICommand(uiCommand);
@@ -1011,10 +1584,12 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                     name: data.toolName,
                     args: data.args,
                   });
+                  record('tool_call', { id: data.toolCallId, name: data.toolName, args: data.args });
                   const args = data.args ?? {};
                   // Call the handler and send result back
                   Promise.resolve(onToolCall(data.toolName, args))
                     .then((result) => {
+                      record('tool_result', { id: data.toolCallId, result });
                       if (socketRef.current?.readyState === WebSocket.OPEN) {
                         log('info', 'Sending tool result', {
                           id: data.toolCallId,
@@ -1031,6 +1606,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                     })
                     .catch((err) => {
                       log('error', 'Tool call error', { error: err });
+                      record('tool_result', { id: data.toolCallId, error: String(err) });
                       if (socketRef.current?.readyState === WebSocket.OPEN) {
                         socketRef.current.send(
                           JSON.stringify({
@@ -1055,6 +1631,7 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                   };
 
                   log('info', 'Received browser control command', { command: bcCommand });
+                  record('browser_control', { action: bcCommand.action, args: bcCommand.args });
 
                   if (browserControl?.autoExecute) {
                     // Auto-execute and send result back
@@ -1211,6 +1788,12 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     setStreamingText(null);
     setStreamingUserText(null);
 
+    // Clean up recording DOM snapshot interval
+    if (domSnapshotIntervalRef.current) {
+      clearInterval(domSnapshotIntervalRef.current);
+      domSnapshotIntervalRef.current = null;
+    }
+
     if (socketRef.current) {
       socketRef.current.close(1000, 'User disconnected');
       socketRef.current = null;
@@ -1339,5 +1922,22 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
     typeIntoElement,
     scrollTo,
     sendBrowserControlResult,
+    // Session Recording
+    startRecording,
+    stopRecording,
+    isRecording,
+    exportRecording,
+    // Workflow Builder
+    registerWorkflow,
+    executeWorkflow,
+    pauseWorkflow,
+    resumeWorkflow,
+    cancelWorkflow,
+    workflowExecution,
+    // Smart Element Detection
+    detectElements,
+    clickDetectedElement,
+    detectedElements,
+    isDetecting,
   };
 }
