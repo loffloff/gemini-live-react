@@ -19,6 +19,7 @@ import type {
   WorkflowExecution,
   DetectedElement,
   DetectionResult,
+  ToolCallContext,
 } from './types';
 
 /**
@@ -174,6 +175,18 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
   // =============================================================================
   const [detectedElements, setDetectedElements] = useState<DetectedElement[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
+
+  // =============================================================================
+  // Refs for ToolCallContext - allows accessing latest state in callbacks
+  // =============================================================================
+  const transcriptsRef = useRef<Transcript[]>([]);
+  const streamingTextRef = useRef<string | null>(null);
+  const streamingUserTextRef = useRef<string | null>(null);
+  const isSpeakingRef = useRef(false);
+  const isMutedRef = useRef(false);
+  const connectionStateRef = useRef<ConnectionState>('idle');
+  const workflowExecutionRef = useRef<WorkflowExecution | null>(null);
+  const detectedElementsRef = useRef<DetectedElement[]>([]);
 
   // Calculate min buffer samples based on minBufferMs (at 24kHz source rate)
   const minBufferSamples = Math.floor((minBufferMs / 1000) * 24000);
@@ -1586,8 +1599,28 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
                   });
                   record('tool_call', { id: data.toolCallId, name: data.toolName, args: data.args });
                   const args = data.args ?? {};
+
+                  // Build context with current state (read from refs for freshness)
+                  const toolCallContext: ToolCallContext = {
+                    transcripts: transcriptsRef.current,
+                    streamingText: streamingTextRef.current,
+                    streamingUserText: streamingUserTextRef.current,
+                    isConnected: connectionStateRef.current === 'connected',
+                    isSpeaking: isSpeakingRef.current,
+                    isMuted: isMutedRef.current,
+                    sendText,
+                    executeWorkflow,
+                    detectElements,
+                    clickDetectedElement,
+                    clickElement,
+                    typeIntoElement,
+                    highlightElement,
+                    workflowExecution: workflowExecutionRef.current,
+                    detectedElements: detectedElementsRef.current,
+                  };
+
                   // Call the handler and send result back
-                  Promise.resolve(onToolCall(data.toolName, args))
+                  Promise.resolve(onToolCall(data.toolName, args, toolCallContext))
                     .then((result) => {
                       record('tool_result', { id: data.toolCallId, result });
                       if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -1870,6 +1903,41 @@ export function useGeminiLive(options: UseGeminiLiveOptions): UseGeminiLiveRetur
   const getMetrics = useCallback((): ConnectionMetrics => {
     return { ...metricsRef.current };
   }, []);
+
+  // =============================================================================
+  // Sync refs for ToolCallContext (keeps state accessible in callbacks)
+  // =============================================================================
+  useEffect(() => {
+    transcriptsRef.current = transcripts;
+  }, [transcripts]);
+
+  useEffect(() => {
+    streamingTextRef.current = streamingText;
+  }, [streamingText]);
+
+  useEffect(() => {
+    streamingUserTextRef.current = streamingUserText;
+  }, [streamingUserText]);
+
+  useEffect(() => {
+    isSpeakingRef.current = isSpeaking;
+  }, [isSpeaking]);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  useEffect(() => {
+    connectionStateRef.current = connectionState;
+  }, [connectionState]);
+
+  useEffect(() => {
+    workflowExecutionRef.current = workflowExecution;
+  }, [workflowExecution]);
+
+  useEffect(() => {
+    detectedElementsRef.current = detectedElements;
+  }, [detectedElements]);
 
   // Capture console errors for browser control get_errors action
   useEffect(() => {

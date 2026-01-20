@@ -363,12 +363,56 @@ export interface ToolCall {
 }
 
 /**
- * Callback function signature for handling tool calls
- * Return the result to send back to the AI
+ * Context passed to tool call handlers with current state and functions.
+ * This allows handlers to access hook state without creating circular dependencies.
+ */
+export interface ToolCallContext {
+  /** All transcript entries from the session */
+  transcripts: Transcript[];
+  /** AI's current partial transcript (real-time) */
+  streamingText: string | null;
+  /** User's current partial transcript (real-time) */
+  streamingUserText: string | null;
+  /** Whether currently connected to the proxy */
+  isConnected: boolean;
+  /** Whether the AI is currently speaking */
+  isSpeaking: boolean;
+  /** Whether microphone is muted */
+  isMuted: boolean;
+  /** Send a text message to Gemini */
+  sendText: (text: string) => void;
+  /** Execute a workflow by ID */
+  executeWorkflow: (id: string, variables?: Record<string, unknown>) => Promise<WorkflowExecution>;
+  /** Detect interactive elements on screen */
+  detectElements: () => Promise<DetectionResult>;
+  /** Click a detected element by ID */
+  clickDetectedElement: (elementId: string) => Promise<BrowserControlResult>;
+  /** Click an element by selector */
+  clickElement: (selector: string) => Promise<BrowserControlResult>;
+  /** Type into an element */
+  typeIntoElement: (selector: string, text: string, clear?: boolean) => Promise<BrowserControlResult>;
+  /** Highlight an element */
+  highlightElement: (selector: string, message?: string, duration?: number) => void;
+  /** Current workflow execution state */
+  workflowExecution: WorkflowExecution | null;
+  /** Latest detected elements */
+  detectedElements: DetectedElement[];
+}
+
+/**
+ * Callback function signature for handling tool calls.
+ * The context parameter provides access to current hook state and functions
+ * without creating circular dependencies.
+ *
+ * @param toolName - Name of the tool being called
+ * @param args - Arguments passed to the tool
+ * @param context - Current state and functions from the hook
+ * @returns Result to send back to the AI
  */
 export type ToolCallHandler = (
   toolName: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  context: ToolCallContext
 ) => Promise<unknown> | unknown;
 
 /**

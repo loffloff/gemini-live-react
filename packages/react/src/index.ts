@@ -11,6 +11,7 @@ export type {
   ToolDefinition,
   ToolCall,
   ToolCallHandler,
+  ToolCallContext,
   // Browser Control types
   BrowserControlAction,
   BrowserControlCommand,
